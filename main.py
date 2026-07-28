@@ -2,8 +2,24 @@ import logging
 import os
 import re
 import requests
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    """Render Web Service 헬스체크용 더미 HTTP 바인딩 레스폰더"""
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
+    def log_message(self, format, *args):
+        return
+
+def start_health_check_server():
+    port = int(os.getenv("PORT", 8080))
+    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+    server.serve_forever()
 
 # 로깅 설정
 logging.basicConfig(
@@ -198,6 +214,9 @@ def main():
     app.add_handler(CommandHandler("ton", ton_command))
     app.add_handler(MessageHandler(filters.Regex(re.compile(r"^/?톤(\s+[0-9,.]+)?$", re.IGNORECASE)), ton_command))
     app.add_handler(MessageHandler(filters.Regex(re.compile(r"^/?([0-9,]+(?:\.[0-9]+)?)\s*(?:톤|ton)$", re.IGNORECASE)), ton_command))
+
+    # Render 웹 서비스 헬스체크용 웹서버 데몬 스레드 실행
+    threading.Thread(target=start_health_check_server, daemon=True).start()
 
     print("텔레그램 코인 시세/계산 봇이 실행 중입니다... (종료하려면 Ctrl+C)")
     app.run_polling()
