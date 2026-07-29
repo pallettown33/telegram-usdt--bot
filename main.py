@@ -18,8 +18,11 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
 
 def start_health_check_server():
     port = int(os.getenv("PORT", 8080))
-    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
-    server.serve_forever()
+    try:
+        server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+        server.serve_forever()
+    except Exception as e:
+        logging.warning(f"Health check server port {port} binding failed (already in use or unavailable): {e}")
 
 # 로깅 설정
 logging.basicConfig(
@@ -170,7 +173,9 @@ async def btc_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args and len(context.args) > 0:
         input_text = " ".join(context.args)
     elif update.message and update.message.text:
-        input_text = update.message.text.strip()
+        text = update.message.text.strip()
+        # '/비트 5000' 형태에서 명령어 부분 제거
+        input_text = re.sub(r"^/?(?:btc|비트코인|비트)\s*", "", text, flags=re.IGNORECASE).strip()
 
     price_info = get_btc_price()
     if not price_info:
@@ -242,7 +247,8 @@ async def krw_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args and len(context.args) > 0:
         input_text = " ".join(context.args)
     elif update.message and update.message.text:
-        input_text = update.message.text.strip()
+        text = update.message.text.strip()
+        input_text = re.sub(r"^/?(?:krw|원화|환산|계산)\s*", "", text, flags=re.IGNORECASE).strip()
 
     krw_amount = parse_krw(input_text)
     if not krw_amount or krw_amount <= 0:
@@ -445,36 +451,34 @@ def main():
         
     app = Application.builder().token(TOKEN).build()
 
-    # 도움말 핸들러
+    # 도움말 핸들러 (영문 전용)
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", start_command))
 
-    # BTC 명령어 & 메시지 핸들러
+    # BTC / KRW / USDT / TON 영문 CommandHandler
     app.add_handler(CommandHandler("btc", btc_command))
-    app.add_handler(CommandHandler("비트", btc_command))
-    app.add_handler(CommandHandler("비트코인", btc_command))
-
-    # 원화 -> 코인 갯수 계산 (통합) 핸들러
     app.add_handler(CommandHandler("krw", krw_command))
-    app.add_handler(CommandHandler("원화", krw_command))
-    app.add_handler(CommandHandler("환산", krw_command))
-    app.add_handler(CommandHandler("계산", krw_command))
-
-    # USDT 명령어 & 메시지 핸들러
     app.add_handler(CommandHandler("usdt", usdt_command))
-    app.add_handler(MessageHandler(filters.Regex(re.compile(r"^/?시세(\s+[0-9,.]+)?$", re.IGNORECASE)), usdt_command))
-    app.add_handler(MessageHandler(filters.Regex(re.compile(r"^/?([0-9,]+(?:\.[0-9]+)?)\s*(?:테더|usdt)$", re.IGNORECASE)), usdt_command))
-
-    # TON (Toncoin) 명령어 & 메시지 핸들러
     app.add_handler(CommandHandler("ton", ton_command))
-    app.add_handler(MessageHandler(filters.Regex(re.compile(r"^/?톤(\s+[0-9,.]+)?$", re.IGNORECASE)), ton_command))
-    app.add_handler(MessageHandler(filters.Regex(re.compile(r"^/?([0-9,]+(?:\.[0-9]+)?)\s*(?:톤|ton)$", re.IGNORECASE)), ton_command))
 
-    # 비트코인 전용 자연어 메시지 핸들러
+    # 한글 명령어 메시지 핸들러 (텔레그램 CommandHandler는 ASCII 전용이므로 Regex 사용)
+    app.add_handler(MessageHandler(filters.Regex(re.compile(r"^/?(비트코인|비트)(\s+.*)?$", re.IGNORECASE)), btc_command))
+    app.add_handler(MessageHandler(filters.Regex(re.compile(r"^/?(원화|환산|계산)(\s+.*)?$", re.IGNORECASE)), krw_command))
+    app.add_handler(MessageHandler(filters.Regex(re.compile(r"^/?시세(\s+[0-9,.]+)?$", re.IGNORECASE)), usdt_command))
+    app.add_handler(MessageHandler(filters.Regex(re.compile(r"^/?톤(\s+[0-9,.]+)?$", re.IGNORECASE)), ton_command))
+
+    # 자연어 계산 메시지 핸들러
+    # 1) '5000만원 btc', '0.5 btc' 등
     app.add_handler(MessageHandler(filters.Regex(re.compile(r"^/?([0-9,.]+\s*(?:억|만|천)?\s*원?)\s*(?:btc|비트코인|비트)$", re.IGNORECASE)), btc_command))
     app.add_handler(MessageHandler(filters.Regex(re.compile(r"^/?([0-9,.]+)\s*(?:비트코인|비트|btc)$", re.IGNORECASE)), btc_command))
+    
+    # 2) '100테더', '100usdt' 등
+    app.add_handler(MessageHandler(filters.Regex(re.compile(r"^/?([0-9,]+(?:\.[0-9]+)?)\s*(?:테더|usdt)$", re.IGNORECASE)), usdt_command))
+    
+    # 3) '100톤', '100ton' 등
+    app.add_handler(MessageHandler(filters.Regex(re.compile(r"^/?([0-9,]+(?:\.[0-9]+)?)\s*(?:톤|ton)$", re.IGNORECASE)), ton_command))
 
-    # 원화 자연어 메시지 핸들러 (예: "5000만원", "1억원", "50000000원")
+    # 4) 원화 금액 단위 메시지 (예: "5000만원", "1억원", "50000000원") -> 통합 환산
     app.add_handler(MessageHandler(filters.Regex(re.compile(r"^/?([0-9,.]+\s*(?:억|만|천)?\s*원)$", re.IGNORECASE)), krw_command))
 
     # Render 웹 서비스 헬스체크용 웹서버 데몬 스레드 실행
