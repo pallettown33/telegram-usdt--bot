@@ -4,7 +4,11 @@ import re
 import requests
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from dotenv import load_dotenv
 from telegram import Update
+
+load_dotenv()
+
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
@@ -30,8 +34,9 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# 봇 토큰 (환경 변수 또는 기본값)
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "REVOKED-TOKEN-REDACTED")
+# 봇 토큰 (환경 변수 전용 - 보안을 위해 하드코딩 금지)
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
 
 def parse_krw(text: str) -> float | None:
     """
@@ -446,8 +451,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(message, parse_mode="Markdown")
 
 def main():
-    if TOKEN == "YOUR_TELEGRAM_BOT_TOKEN_HERE":
-        print("⚠️ 경고: main.py 파일 내 TOKEN 값에 BotFather에게 받은 실제 텔레그램 봇 토큰을 입력해 주세요.")
+    if not TOKEN:
+        logging.error("❌ 오류: TELEGRAM_BOT_TOKEN 환경변수가 설정되지 않았습니다. .env 파일이나 서버 환경변수에 토큰을 설정해 주세요.")
+        return
         
     app = Application.builder().token(TOKEN).build()
 
